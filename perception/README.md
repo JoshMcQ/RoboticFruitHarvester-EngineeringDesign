@@ -214,7 +214,18 @@ The module includes ready-to-use templates for popular depth cameras:
 
 ## Setup and Dependencies
 
-### Required Packages
+### Quick Setup
+From the project root directory:
+```bash
+# Install all required dependencies
+pip install -r requirements.txt
+
+# Then install the Kinova API (download .whl file first)
+pip install kortex_api-2.6.0.post3-py3-none-any.whl
+```
+
+### Manual Installation (Alternative)
+If you prefer to install packages individually:
 ```bash
 pip install torch torchvision opencv-python numpy
 ```
