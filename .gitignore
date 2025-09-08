@@ -205,3 +205,29 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Model files and AI artifacts
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+*.pb
+*.h5
+*.pkl
+*.pickle
+
+# YOLOv5 specific model files
+yolov5s.pt
+yolov5m.pt
+yolov5l.pt
+yolov5x.pt
+yolov5n.pt
+
+# AI cache directories
+.cache/
+*.cache
+
+# Kinova API files
+kortex_api-*.whl
+*.whl

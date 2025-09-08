@@ -1,4 +1,3 @@
-#! /usr/bin/env python3
 import os
 import sys
 import time
@@ -81,11 +80,11 @@ def main():
         base = BaseClient(router)
         base_cyclic = BaseCyclicClient(router)  # kept for future (force feedback, etc.)
 
-        # 1) Move to Home position
+        # Move to Home position
         if not move_to_home(base):
             print("Warning: failed to reach Home; continuing.")
 
-        # 2) Future: add perception.py to get object pose from camera
+        # Future: add perception.py to get object pose from camera
         # global OBJECT_X, OBJECT_Y, OBJECT_Z
         # if HAS_PERCEPTION:
         #     try:
@@ -96,7 +95,7 @@ def main():
         
         print(f"Using predefined object pose: x={OBJECT_X:.3f}, y={OBJECT_Y:.3f}, z={OBJECT_Z:.3f}")
 
-        # 3) Approach above object and descend
+        # Approach above object and descend
         approach_z = OBJECT_Z + APPROACH_H
         if not _execute_waypoints_via_examples(
             base,
@@ -107,11 +106,11 @@ def main():
         ):
             return 1
 
-        # 4) Close gripper to grasp object (future: add force feedback threshold)
+        # Close gripper to grasp object (future: add force feedback threshold)
         gripper = GripperCommandExample(router)
         gripper.ExampleSendGripperCommands()
 
-        # 5) Lift object to safe height
+        # Lift object to safe height
         lift_z = OBJECT_Z + LIFT_H
         if not _execute_waypoints_via_examples(
             base,
