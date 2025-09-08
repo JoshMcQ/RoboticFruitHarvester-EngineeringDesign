@@ -299,6 +299,43 @@ depth_scale = pipeline.get_active_profile().get_device().first_depth_sensor().ge
 x, y, z = compute_object_pose_base(depth_array, depth_scale)
 ```
 
+### Testing the Perception System
+
+You can test the perception system independently before integrating with the robot:
+
+**From the project root:**
+```bash
+cd perception
+python perception.py
+```
+
+**Or directly:**
+```bash
+python perception/perception.py
+```
+
+**Expected output (success):**
+```
+Testing perception system...
+Make sure a camera is connected and visible objects are in view.
+Using cache found in C:\Users\..\.cache\torch\hub\ultralytics_yolov5_master
+YOLOv5 🚀 2025-9-7 Python-3.12.4 torch-2.8.0+cpu CPU
+Downloading https://github.com/ultralytics/yolov5/releases/download/v7.0/yolov5s.pt...
+Fusing layers... 
+YOLOv5s summary: 213 layers, 7225885 parameters, 0 gradients, 16.4 GFLOPs
+Adding AutoShape... 
+px=(365,326) conf=0.66 class=0
+✅ Object detected at: x=0.007m, y=0.014m, z=0.100m
+Perception system working correctly!
+```
+
+**What happens during testing:**
+1. **Camera activation** - Your webcam light will flash briefly as it captures a single frame
+2. **Model loading** - Downloads YOLOv5s model (~14MB) on first run, loads from cache thereafter
+3. **Object detection** - Analyzes the captured frame for objects
+4. **Coordinate conversion** - Converts pixel coordinates to robot base frame coordinates
+5. **Results display** - Shows detected object position and confidence
+
 ### Integration with Main Robot Code
 ```python
 # In main.py, uncomment these lines:
