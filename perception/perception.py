@@ -44,6 +44,19 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
 
     with torch.no_grad():                  # inference only
         res = model(rgb, size=640)         # default imgsz
+
+        #----Gabriel 
+
+        # Draw bounding boxes on the image
+        res.render()  # modifies res.ims[0] with boxes
+
+        # Save the image to disk
+        cv2.imwrite("detection_snapshot.jpg", cv2.cvtColor(res.ims[0], cv2.COLOR_RGB2BGR))
+        print("Saved detection snapshot to detection_snapshot.jpg")
+
+        #----Gabriel
+
+
         preds = res.xyxy[0].cpu().numpy()  # no pandas dep
     if preds.size == 0:
         print("no detections")
@@ -66,6 +79,15 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     return float(xb), float(yb), float(zb)
 
 # ---------------- camera stubs (uncomment when ready) ----------------
+
+# Gabe
+if __name__ == "__main__":
+    print("Running perception test...")
+    x, y, z = compute_object_pose_base()
+    print(f"Detected object pose: x={x:.3f}, y={y:.3f}, z={z:.3f}")
+
+#Gabe
+
 # RealSense (pyrealsense2): depth aligned to color + real depth scale
 # import pyrealsense2 as rs, numpy as np
 # def get_realsense_frames():
