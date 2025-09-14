@@ -1,4 +1,3 @@
-# perception.py — minimal, fast, and ready for depth 
 import cv2, torch, numpy as np
 
 # --- fill these later (calibration) ---
