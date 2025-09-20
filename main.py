@@ -24,6 +24,31 @@ from Kinova.gripper_command import GripperCommandExample
 # except Exception:
 #     HAS_PERCEPTION = False
 
+#GABEEEE
+# Vision system integration
+try:
+    from perception import compute_object_pose_base
+    HAS_PERCEPTION = True
+except Exception as e:
+    print(f"Perception module not available: {e}")
+    HAS_PERCEPTION = False
+
+# Use vision if available
+global OBJECT_X, OBJECT_Y, OBJECT_Z
+if HAS_PERCEPTION:
+    try:
+        OBJECT_X, OBJECT_Y, OBJECT_Z = compute_object_pose_base()
+        print(f"[VISION] Object pose from camera: x={OBJECT_X:.3f}, y={OBJECT_Y:.3f}, z={OBJECT_Z:.3f}")
+    except Exception as e:
+        print(f"[VISION] Perception failed; using default pose: {e}")
+else:
+    print(f"[VISION] Perception not available; using default pose.")
+
+
+#GABEEE
+
+
+
 # -------- Object pose and movement parameters --------
 OBJECT_X, OBJECT_Y, OBJECT_Z = 0.60, 0.00, 0.10
 TOOL_TX, TOOL_TY, TOOL_TZ = 90.0, 0.0, 90.0
