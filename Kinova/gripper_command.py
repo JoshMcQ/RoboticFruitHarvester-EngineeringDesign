@@ -19,23 +19,23 @@ import time
 from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
 from kortex_api.autogen.messages import Base_pb2
 
-class GripperCommandExample:
-    def __init__(self, router, proportional_gain = 2.0):
 
+class GripperCommandExample:
+    def __init__(self, router, force_sensor=None, proportional_gain=2.0, force_threshold=5.0):
         self.proportional_gain = proportional_gain
         self.router = router
-
-        # Create base client using TCP router
         self.base = BaseClient(self.router)
+        self.force_sensor = force_sensor  # Should be an object with a .read() method
+        self.force_threshold = force_threshold
+
 
     def ExampleSendGripperCommands(self):
-
-        # Create the GripperCommand we will send
+        # ...existing code...
         gripper_command = Base_pb2.GripperCommand()
         finger = gripper_command.gripper.finger.add()
 
-        # Close the gripper with position increments
-        print("Performing gripper test in position...")
+        # Close the gripper with position increments, with force feedback
+        print("Performing gripper test in position with force feedback...")
         gripper_command.mode = Base_pb2.GRIPPER_POSITION
         position = 0.00
         finger.finger_identifier = 1
@@ -45,6 +45,16 @@ class GripperCommandExample:
             self.base.SendGripperCommand(gripper_command)
             position += 0.1
             time.sleep(1)
+            # Force feedback integration
+            if self.force_sensor:
+                force, status = self.force_sensor.read()
+                print(f"Force sensor reading: {force}, status: {status}")
+                if force > self.force_threshold:
+                    print("Gripper stopped: safe force reached")
+                    break
+                if status == "error":
+                    print("Sensor error: gripper stopped for safety.")
+                    break
 
         # Set speed to open gripper
         print ("Opening gripper using speed command...")
@@ -61,24 +71,35 @@ class GripperCommandExample:
                 print("Current position is : {0}".format(gripper_measure.finger[0].value))
                 if gripper_measure.finger[0].value < 0.01:
                     break
-            else: # Else, no finger present in answer, end loop
+            else:
                 break
 
-        # Set speed to close gripper
-        print ("Closing gripper using speed command...")
+        # Set speed to close gripper with force feedback
+        print ("Closing gripper using speed command with force feedback...")
         gripper_command.mode = Base_pb2.GRIPPER_SPEED
         finger.value = -0.1
         self.base.SendGripperCommand(gripper_command)
 
-        # Wait for reported speed to be 0
         gripper_request.mode = Base_pb2.GRIPPER_SPEED
         while True:
             gripper_measure = self.base.GetMeasuredGripperMovement(gripper_request)
             if len (gripper_measure.finger):
                 print("Current speed is : {0}".format(gripper_measure.finger[0].value))
+                # Force feedback integration
+                if self.force_sensor:
+                    force, status = self.force_sensor.read()
+                    print(f"Force sensor reading: {force}, status: {status}")
+                    if force > self.force_threshold:
+                        print("Gripper stopped: safe force reached.")
+                        self.base.SendGripperCommand(gripper_command)  # Optionally send stop command
+                        break
+                    if status == "error":
+                        print("Sensor error: gripper stopped for safety.")
+                        self.base.SendGripperCommand(gripper_command)
+                        break
                 if gripper_measure.finger[0].value == 0.0:
                     break
-            else: # Else, no finger present in answer, end loop
+            else:
                 break
 
 def main():
