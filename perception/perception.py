@@ -1,13 +1,33 @@
-# perception.py — minimal, fast, and ready for depth when you are
-import cv2, torch, numpy as np
 
-# --- fill these later (calibration) ---
+import cv2, torch, numpy as np, json, os
+
+# --- Load calibration from file if available ---
+CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), '..', 'camera_calibration_latest.json')
 K = np.array([[600.0, 0.0, 320.0],
               [0.0, 600.0, 240.0],
               [0.0,   0.0,   1.0]], dtype=float)   # fx,fy,cx,cy
+DIST_COEFFS = np.zeros((5,))
 T_base_cam = np.eye(4, dtype=float)                # 4x4 cam->base
-Z_TABLE_M = 0.10                                    # table height (m)
+Z_TABLE_M = 0.241                                   # assume objects ~9.5 inches away
 DEPTH_SCALE = 0.001                                 # units->m (e.g., RealSense)
+
+def load_calibration():
+    global K, DIST_COEFFS
+    if os.path.exists(CALIBRATION_FILE):
+        with open(CALIBRATION_FILE, 'r') as f:
+            calib = json.load(f)
+        K = np.array(calib.get('camera_matrix', K)).astype(float)
+        DIST_COEFFS = np.array(calib.get('distortion_coefficients', DIST_COEFFS)).astype(float)
+        print(f"Loaded calibration from {CALIBRATION_FILE}")
+    else:
+        print("Calibration file not found, using default K.")
+
+def calibration_status():
+    if os.path.exists(CALIBRATION_FILE):
+        return True, CALIBRATION_FILE
+    return False, None
+
+load_calibration()
 
 # --- YOLOv5: load once, eval, pick device ---
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -28,14 +48,19 @@ def _backproject(u, v, Z):
 def _cam_to_base(Pc_h):
     return (T_base_cam @ Pc_h)[:3]
 
-def _get_cv_frame(index=0, w=640, h=480):
+
+def _get_cv_frame(index=0, w=640, h=480, undistort=True):
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # works well on Windows
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
     ok, bgr = cap.read()
     cap.release()
     if not ok: raise RuntimeError("No camera frame")
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    if undistort and DIST_COEFFS is not None and np.any(DIST_COEFFS):
+        rgb = cv2.undistort(rgb, K, DIST_COEFFS)
+    return rgb
+
 
 #------TEST GABE
 import time
@@ -51,23 +76,13 @@ def log_detection_performance(confidence, class_id, x, y, z, log_file="detection
 def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     """Return (x,y,z) in BASE. Uses depth if given; else falls back to table Z."""
     model = _get_model()
-    rgb = _get_cv_frame(0, 640, 480)
+    rgb = _get_cv_frame(0, 640, 480, undistort=True)
 
     with torch.no_grad():                  # inference only
         res = model(rgb, size=640)         # default imgsz
-
-        #----Gabriel 
-
-        # Draw bounding boxes on the image
         res.render()  # modifies res.ims[0] with boxes
-
-        # Save the image to disk
         cv2.imwrite("detection_snapshot.jpg", cv2.cvtColor(res.ims[0], cv2.COLOR_RGB2BGR))
         print("Saved detection snapshot to detection_snapshot.jpg")
-
-        #----Gabriel
-
-
         preds = res.xyxy[0].cpu().numpy()  # no pandas dep
     if preds.size == 0:
         print("no detections")
@@ -76,7 +91,10 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     # highest conf
     x1,y1,x2,y2,conf,cls_id = max(preds, key=lambda p: p[4])
     u = int(0.5*(x1+x2)); v = int(0.5*(y1+y2))
-    print(f"px=({u},{v}) conf={conf:.2f} class={int(cls_id)}")
+    
+    # Get class name from model
+    class_name = model.names[int(cls_id)]
+    print(f"px=({u},{v}) conf={conf:.2f} class={int(cls_id)} ({class_name})")
 
     # depth if you have it; else table
     Zm = Z_TABLE_M
@@ -136,3 +154,16 @@ if __name__ == "__main__":
 #     # open camera, zed.grab(), zed.retrieve_image(VIEW.LEFT), zed.retrieve_measure(MEASURE.DEPTH)
 #     # convert to numpy; depth already aligned to LEFT
 #     raise NotImplementedError
+
+# -------------------- Test/Demo Mode --------------------
+if __name__ == "__main__":
+    print("Testing perception system...")
+    print("Make sure a camera is connected and visible objects are in view.")
+    
+    try:
+        x, y, z = compute_object_pose_base()
+        print(f"✅ Object detected at: x={x:.3f}m, y={y:.3f}m, z={z:.3f}m")
+        print("Perception system working correctly!")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        print("Check camera connection and dependencies.")
