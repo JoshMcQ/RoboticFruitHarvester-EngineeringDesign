@@ -1,4 +1,4 @@
-# perception.py — minimal, fast, and ready for depth 
+# perception.py — minimal, fast, and ready for depth when you are
 import cv2, torch, numpy as np
 
 # --- fill these later (calibration) ---
@@ -37,6 +37,17 @@ def _get_cv_frame(index=0, w=640, h=480):
     if not ok: raise RuntimeError("No camera frame")
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
+#------TEST GABE
+import time
+
+def log_detection_performance(confidence, class_id, x, y, z, log_file="detection_log.txt"):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    log_entry = f"{timestamp} | Confidence: {confidence:.2f} | Class ID: {int(class_id)} | Position (x, y, z): ({x:.3f}, {y:.3f}, {z:.3f})\n"
+    with open(log_file, "a") as file:
+        file.write(log_entry)
+    print(f"Logged detection performance to {log_file}")
+#------TEST GABE
+
 def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     """Return (x,y,z) in BASE. Uses depth if given; else falls back to table Z."""
     model = _get_model()
@@ -65,12 +76,9 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     # highest conf
     x1,y1,x2,y2,conf,cls_id = max(preds, key=lambda p: p[4])
     u = int(0.5*(x1+x2)); v = int(0.5*(y1+y2))
-    
-    # Get class name from model
-    class_name = model.names[int(cls_id)]
-    print(f"px=({u},{v}) conf={conf:.2f} class={int(cls_id)} ({class_name})")
+    print(f"px=({u},{v}) conf={conf:.2f} class={int(cls_id)}")
 
-    # depth if we have it; else table
+    # depth if you have it; else table
     Zm = Z_TABLE_M
     if depth_frame is not None:
         z_raw = float(depth_frame[v, u])
@@ -79,6 +87,12 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
 
     Pc = _backproject(u, v, Zm)            # cam frame
     xb, yb, zb = _cam_to_base(Pc)          # base frame
+    
+    #----GABE TEST
+    log_detection_performance(conf, cls_id, xb, yb, zb)
+    #----GABE TEST
+
+
     return float(xb), float(yb), float(zb)
 
 # ---------------- camera stubs (uncomment when ready) ----------------
@@ -122,16 +136,3 @@ if __name__ == "__main__":
 #     # open camera, zed.grab(), zed.retrieve_image(VIEW.LEFT), zed.retrieve_measure(MEASURE.DEPTH)
 #     # convert to numpy; depth already aligned to LEFT
 #     raise NotImplementedError
-
-# -------------------- Test/Demo Mode --------------------
-if __name__ == "__main__":
-    print("Testing perception system...")
-    print("Make sure a camera is connected and visible objects are in view.")
-    
-    try:
-        x, y, z = compute_object_pose_base()
-        print(f"✅ Object detected at: x={x:.3f}m, y={y:.3f}m, z={z:.3f}m")
-        print("Perception system working correctly!")
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        print("Check camera connection and dependencies.")
