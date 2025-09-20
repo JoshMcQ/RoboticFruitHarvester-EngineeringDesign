@@ -105,7 +105,7 @@ def main():
             ],
         ):
             return 1
-
+      
         # Close gripper to grasp object (future: add force feedback threshold)
         gripper = GripperCommandExample(router)
         gripper.ExampleSendGripperCommands()
