@@ -1,13 +1,33 @@
-# perception.py — minimal, fast, and ready for depth 
-import cv2, torch, numpy as np
 
-# --- fill these later (calibration) ---
+import cv2, torch, numpy as np, json, os
+
+# --- Load calibration from file if available ---
+CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), '..', 'camera_calibration_latest.json')
 K = np.array([[600.0, 0.0, 320.0],
               [0.0, 600.0, 240.0],
               [0.0,   0.0,   1.0]], dtype=float)   # fx,fy,cx,cy
+DIST_COEFFS = np.zeros((5,))
 T_base_cam = np.eye(4, dtype=float)                # 4x4 cam->base
-Z_TABLE_M = 0.10                                    # table height (m)
+Z_TABLE_M = 0.241                                   # assume objects ~9.5 inches away
 DEPTH_SCALE = 0.001                                 # units->m (e.g., RealSense)
+
+def load_calibration():
+    global K, DIST_COEFFS
+    if os.path.exists(CALIBRATION_FILE):
+        with open(CALIBRATION_FILE, 'r') as f:
+            calib = json.load(f)
+        K = np.array(calib.get('camera_matrix', K)).astype(float)
+        DIST_COEFFS = np.array(calib.get('distortion_coefficients', DIST_COEFFS)).astype(float)
+        print(f"Loaded calibration from {CALIBRATION_FILE}")
+    else:
+        print("Calibration file not found, using default K.")
+
+def calibration_status():
+    if os.path.exists(CALIBRATION_FILE):
+        return True, CALIBRATION_FILE
+    return False, None
+
+load_calibration()
 
 # --- YOLOv5: load once, eval, pick device ---
 _DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -28,35 +48,41 @@ def _backproject(u, v, Z):
 def _cam_to_base(Pc_h):
     return (T_base_cam @ Pc_h)[:3]
 
-def _get_cv_frame(index=0, w=640, h=480):
+
+def _get_cv_frame(index=0, w=640, h=480, undistort=True):
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)  # works well on Windows
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
     ok, bgr = cap.read()
     cap.release()
     if not ok: raise RuntimeError("No camera frame")
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    if undistort and DIST_COEFFS is not None and np.any(DIST_COEFFS):
+        rgb = cv2.undistort(rgb, K, DIST_COEFFS)
+    return rgb
+
+
+#------TEST GABE
+import time
+
+def log_detection_performance(confidence, class_id, x, y, z, log_file="detection_log.txt"):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    log_entry = f"{timestamp} | Confidence: {confidence:.2f} | Class ID: {int(class_id)} | Position (x, y, z): ({x:.3f}, {y:.3f}, {z:.3f})\n"
+    with open(log_file, "a") as file:
+        file.write(log_entry)
+    print(f"Logged detection performance to {log_file}")
+#------TEST GABE
 
 def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     """Return (x,y,z) in BASE. Uses depth if given; else falls back to table Z."""
     model = _get_model()
-    rgb = _get_cv_frame(0, 640, 480)
+    rgb = _get_cv_frame(0, 640, 480, undistort=True)
 
     with torch.no_grad():                  # inference only
         res = model(rgb, size=640)         # default imgsz
-
-        #----Gabriel 
-
-        # Draw bounding boxes on the image
         res.render()  # modifies res.ims[0] with boxes
-
-        # Save the image to disk
         cv2.imwrite("detection_snapshot.jpg", cv2.cvtColor(res.ims[0], cv2.COLOR_RGB2BGR))
         print("Saved detection snapshot to detection_snapshot.jpg")
-
-        #----Gabriel
-
-
         preds = res.xyxy[0].cpu().numpy()  # no pandas dep
     if preds.size == 0:
         print("no detections")
@@ -70,7 +96,7 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
     class_name = model.names[int(cls_id)]
     print(f"px=({u},{v}) conf={conf:.2f} class={int(cls_id)} ({class_name})")
 
-    # depth if we have it; else table
+    # depth if you have it; else table
     Zm = Z_TABLE_M
     if depth_frame is not None:
         z_raw = float(depth_frame[v, u])
@@ -79,6 +105,12 @@ def compute_object_pose_base(depth_frame=None, depth_scale=DEPTH_SCALE):
 
     Pc = _backproject(u, v, Zm)            # cam frame
     xb, yb, zb = _cam_to_base(Pc)          # base frame
+    
+    #----GABE TEST
+    log_detection_performance(conf, cls_id, xb, yb, zb)
+    #----GABE TEST
+
+
     return float(xb), float(yb), float(zb)
 
 # ---------------- camera stubs (uncomment when ready) ----------------
