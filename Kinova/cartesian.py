@@ -17,11 +17,12 @@ import os
 import time
 import threading
 
-
 from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
 from kortex_api.autogen.client_stubs.BaseCyclicClientRpc import BaseCyclicClient
 
+
 from kortex_api.autogen.messages import Base_pb2, BaseCyclic_pb2, Common_pb2
+
 # Maximum allowed waiting time during actions (in seconds)
 TIMEOUT_DURATION = 30
 
@@ -36,10 +37,8 @@ def check_for_end_or_abort(e):
     def check(notification, e = e):
         print("EVENT : " + \
               Base_pb2.ActionEvent.Name(notification.action_event))
-        if notification.action_event == Base_pb2.ACTION_END:
-            print("Completed Successfully")
-        elif notification.action_event == Base_pb2.ACTION_ABORT:
-            print("Action was aborted")
+        if notification.action_event == Base_pb2.ACTION_END \
+        or notification.action_event == Base_pb2.ACTION_ABORT:
             e.set()
     return check
  
@@ -56,7 +55,7 @@ def example_move_to_home_position(base):
     action_list = base.ReadAllActions(action_type)
     action_handle = None
     for action in action_list.action_list:
-        if action.name == "Home":
+        if action.name == "Retract":
             action_handle = action.handle
 
     if action_handle == None:
@@ -78,6 +77,7 @@ def example_move_to_home_position(base):
     else:
         print("Timeout on action notification wait")
     return finished
+
 def populateCartesianCoordinate(waypointInformation):
     
     waypoint = Base_pb2.CartesianWaypoint()  
@@ -99,16 +99,16 @@ def example_trajectory(base, base_cyclic):
     base.SetServoingMode(base_servo_mode)
     product = base.GetProductConfiguration()
     waypointsDefinition = tuple(tuple())
-
     if(   product.model == Base_pb2.ProductConfiguration__pb2.MODEL_ID_L53 
        or product.model == Base_pb2.ProductConfiguration__pb2.MODEL_ID_L31):
         if(product.model == Base_pb2.ProductConfiguration__pb2.MODEL_ID_L31):
             kTheta_x = 90.6
             kTheta_y = -1.0
             kTheta_z = 150.0
-            waypointsDefinition = ( (0.439,  0.194, 0.448, 0.0, kTheta_x, kTheta_y, kTheta_z),
-                                    (0.200,  0.150, 0.400, 0.0, kTheta_x, kTheta_y, kTheta_z),
-                                    (0.350,  0.050, 0.300, 0.0, kTheta_x, kTheta_y, kTheta_z))
+            waypointsDefinition = ( (0.497,  -0.024, 0.263, 0.0, 98.035, 4.639, 123.538),
+                                    (0.495,  -0.023, 0.189, 0.0, 102.728, -3.498, 123.519),
+                                    (0.460,  -0.170, 0.325, 0.0, 94.091, 11.431, 105.063),
+                                    (0.462,  -0.171, 0.169, 0.0, 103.837, -5.858, 105.634))
         else:
             kTheta_x = 90.0
             kTheta_y = 0.0
@@ -180,48 +180,6 @@ def example_trajectory(base, base_cyclic):
         print("Error found in trajectory") 
         result.trajectory_error_report.PrintDebugString();  
 
-    # base_servo_mode = Base_pb2.ServoingModeInformation()
-    # base_servo_mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
-    # base.SetServoingMode(base_servo_mode)
-
-    # # Define trajectory waypoints
-    # kTheta_x = 90.0
-    # kTheta_y = 0.0
-    # kTheta_z = 90.0
-
-    # waypointsDefinition = (
-    #     (0.4, 0.0, 0.4, 0.0, kTheta_x, kTheta_y, kTheta_z),  # Approach above fruit
-    #     (0.4, 0.0, 0.2, 0.0, kTheta_x, kTheta_y, kTheta_z),  # Lower to fruit
-    #     (0.4, 0.0, 0.4, 0.0, kTheta_x, kTheta_y, kTheta_z),  # Lift fruit
-    # )
-
-    # # Build the waypoint list
-    # waypoints = Base_pb2.WaypointList()
-    # waypoints.duration = 0.0
-    # waypoints.use_optimal_blending = False
-
-
-    # index = 0
-    # for waypointDefinition in waypointsDefinition:
-    #     waypoint = waypoints.waypoints.add()
-    #     waypoint.name = "waypoint_" + str(index)   
-    #     waypoint.cartesian_waypoint.CopyFrom(populateCartesianCoordinate(waypointDefinition))
-    #     index = index + 1 
-
-    # #executing trajectory
-    # e = threading.Event()
-    # notification_handle = base.OnNotificationActionTopic(check_for_end_or_abort(e), Base_pb2.NotificationOptions())
-
-    # print("Moving cartesian trajectory...")
-        
-    # base.ExecuteWaypointTrajectory(waypoints)
-
-    # print("Waiting for trajectory to finish ...")
-    # finished = e.wait(TIMEOUT_DURATION)
-    # base.Unsubscribe(notification_handle)
-    # return finished
-
-    
 
 def main():
     
@@ -243,10 +201,9 @@ def main():
         # Example core
         success = True
 
-        print("Move to home position")
         success &= example_move_to_home_position(base)
-        print("Send cartesian waypoint trajectory")    
         success &= example_trajectory(base, base_cyclic)
+        success &= example_move_to_home_position(base)
        
         return 0 if success else 1
 
