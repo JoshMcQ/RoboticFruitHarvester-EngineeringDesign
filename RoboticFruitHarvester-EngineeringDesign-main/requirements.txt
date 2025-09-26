@@ -1,0 +1,24 @@
+# Core robot control dependencies
+# Note: kortex_api must be installed separately from the .whl file
+# Download from: https://artifactory.kinovaapps.com/ui/native/generic-public/kortex/API/2.6.0/
+
+# Computer vision and machine learning
+torch
+torchvision
+opencv-python
+numpy
+ultralytics          # YOLOv5 and related utilities
+pandas               # Data processing (YOLOv5 results)
+Pillow               # Image processing
+matplotlib           # For visualization (YOLOv5 dependency)
+requests             # For model downloads
+PyYAML               # Configuration files
+tqdm                 # Progress bars
+scipy                # Scientific computing
+seaborn              # Statistical plotting (YOLOv5 uses this)
+thop                 # FLOP counting (YOLOv5 model analysis)
+
+# Optional depth camera support (uncomment as needed)
+# pyrealsense2      # Intel RealSense cameras
+# depthai           # OAK-D cameras
+# pyzed             # ZED cameras (requires ZED SDK)
