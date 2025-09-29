@@ -2,107 +2,8 @@ import os
 import sys
 import time
 import threading
-import re
-
-# --- Arduino force sensor integration (START) ---
 import serial
-
-# Accepts either "Reading: 123" or "F=123"
-READING_RE = re.compile(r"^\s*(?:Reading:|F=)\s*(\d+)\s*\)?\s*$")
-
-def _parse_force_line(line: str):
-    m = READING_RE.match(line)
-    return int(m.group(1)) if m else None
-
-# NOTE: Base_pb2 is imported below; these functions won't run until after import.
-def _gripper_speed(base, speed_01):
-    from kortex_api.autogen.messages import Base_pb2
-    cmd = Base_pb2.GripperCommand()
-    cmd.mode = Base_pb2.GRIPPER_SPEED
-    f = cmd.gripper.finger.add()
-    f.finger_identifier = 1
-    f.value = float(speed_01)  # +close / -open
-    base.SendGripperCommand(cmd)
-
-def _gripper_pos_measured(base):
-    from kortex_api.autogen.messages import Base_pb2
-    req = Base_pb2.GripperRequest()
-    req.mode = Base_pb2.GRIPPER_POSITION
-    meas = base.GetMeasuredGripperMovement(req)
-    return (meas.finger[0].value if len(meas.finger) else None)
-
-def close_touch_then_wait_force(base, ser,
-                                close_speed=0.20,          # gentle close (0..1)
-                                touch_eps=0.0025,          # plateau tolerance on measured pos
-                                touch_hits=6,              # consecutive plateaus = touch
-                                touch_max_time=6.0,        # max seconds to search for touch
-                                force_threshold=500,       # Arduino threshold
-                                force_window=8.0,          # seconds to wait after touch
-                                backoff_open_time=0.06):   # small open after threshold
-    """
-    Phase 1: Close slowly until the gripper's *measured* position plateaus (touch/contact).
-    Phase 2: Stop and wait up to `force_window` for Arduino force >= threshold.
-    Returns: 'touched_and_forced' | 'touched_no_force' | 'no_touch'
-    """
-    print("[Touch] closing slowly to detect contact...")
-    _gripper_speed(base, +close_speed)
-
-    hits = 0
-    t0 = time.time()
-    prev = None
-    while (time.time() - t0) < touch_max_time:
-        time.sleep(0.06)  # ~16 Hz poll; don't hammer the API
-        cur = _gripper_pos_measured(base)
-        if cur is None:
-            continue
-        if prev is not None:
-            if abs(cur - prev) < touch_eps:
-                hits += 1
-            else:
-                hits = 0
-        prev = cur
-        if hits >= touch_hits:
-            print(f"[Touch] contact detected at measured={cur:.3f}")
-            break
-    else:
-        # never broke -> no touch
-        base.Stop()
-        print("[Touch] no contact before timeout")
-        return "no_touch"
-
-    # Stop motion at touch point
-    base.Stop()
-
-    # ---- Phase 2: wait for external force threshold (Arduino) ----
-    print(f"[Force] waiting up to {force_window:.1f}s for Arduino >= {force_threshold}...")
-    t1 = time.time()
-    consec = 0
-    need = 3  # require a few consecutive frames at/above threshold to avoid noise
-    while (time.time() - t1) < force_window:
-        line = ser.readline().decode("utf-8", errors="ignore").strip()
-        if not line:
-            continue
-        val = _parse_force_line(line)
-        if val is None:
-            # Optional: uncomment to see all serial lines
-            # print(f"[Force][raw] {line}")
-            continue
-        # print(f"[Force] {val}")  # verbose if needed
-        if val >= force_threshold:
-            consec += 1
-            if consec >= need:
-                print(f"[Force] threshold reached: {val}")
-                if backoff_open_time > 0:
-                    _gripper_speed(base, -0.25)  # tiny open nudge
-                    time.sleep(backoff_open_time)
-                    base.Stop()
-                return "touched_and_forced"
-        else:
-            consec = 0
-
-    print("[Force] window elapsed without threshold")
-    return "touched_no_force"
-# --- Arduino force sensor integration (END) ---
+from serial.tools import list_ports
 
 from kortex_api.autogen.client_stubs.BaseClientRpc import BaseClient
 from kortex_api.autogen.messages import Base_pb2
@@ -130,12 +31,10 @@ def populate_cartesian(waypoint):
     return w
 
 def execute_waypoints(base: BaseClient, waypoints_def):
-    # Set servoing mode
     base_servo_mode = Base_pb2.ServoingModeInformation()
     base_servo_mode.servoing_mode = Base_pb2.SINGLE_LEVEL_SERVOING
     base.SetServoingMode(base_servo_mode)
 
-    # Build list
     wl = Base_pb2.WaypointList()
     wl.duration = 0.0
     wl.use_optimal_blending = False
@@ -145,14 +44,12 @@ def execute_waypoints(base: BaseClient, waypoints_def):
         wp.name = f"waypoint_{idx}"
         wp.cartesian_waypoint.CopyFrom(populate_cartesian(wp_def))
 
-    # Validate (optional but useful)
     result = base.ValidateWaypointList(wl)
     if len(result.trajectory_error_report.trajectory_error_elements):
         print("Trajectory validation failed:")
         result.trajectory_error_report.PrintDebugString()
         return False
 
-    # Execute and wait
     done_evt = threading.Event()
     handle = base.OnNotificationActionTopic(check_for_end_or_abort(done_evt), Base_pb2.NotificationOptions())
     print("Moving cartesian trajectory...")
@@ -166,156 +63,239 @@ def execute_waypoints(base: BaseClient, waypoints_def):
 
 def gripper_set_position(base: BaseClient, position: float, force_threshold=500, ser=None):
     """
-    If called with position >= 0.9 and a serial port, run the two-phase routine:
-    1) close slowly until *touch* (firmware-measured plateau), then
-    2) wait for Arduino force threshold.
-    Otherwise, just command the target position.
-    Returns True if force threshold confirmed, False otherwise.
+    Fixed gripper control with force feedback.
+    For closing (position >= 0.9): use force sensor if available
+    For opening: just open normally
     """
-    if position >= 0.9 and ser is not None:
-        result = close_touch_then_wait_force(
-            base, ser,
-            close_speed=0.20,         # tune as needed
-            touch_eps=0.0025,
-            touch_hits=6,
-            touch_max_time=6.0,
-            force_threshold=force_threshold,
-            force_window=8.0,
-            backoff_open_time=0.06
-        )
-        if result == "touched_and_forced":
-            return True
-        elif result == "touched_no_force":
-            print("Warning: Touched object but no external force within window.")
-            return False
-        else:
-            print("Warning: No touch detected before timeout.")
-            return False
-
-    # Normal open/close (no force logic)
-    cmd = Base_pb2.GripperCommand()
-    cmd.mode = Base_pb2.GRIPPER_POSITION
-    finger = cmd.gripper.finger.add()
-    finger.finger_identifier = 1
-    finger.value = position
-    base.SendGripperCommand(cmd)
-    time.sleep(0.5)
-    return True
+    
+    # Opening - simple position command
+    if position < 0.5:
+        print("Opening gripper...")
+        cmd = Base_pb2.GripperCommand()
+        cmd.mode = Base_pb2.GRIPPER_POSITION
+        finger = cmd.gripper.finger.add()
+        finger.finger_identifier = 1
+        finger.value = position
+        base.SendGripperCommand(cmd)
+        time.sleep(2)
+        return True
+    
+    # Closing with force feedback
+    if ser is not None:
+        print(f"Closing with force monitoring (threshold: {force_threshold})...")
+        
+        # Use SPEED mode for gradual controlled closing
+        # NEGATIVE speed closes, POSITIVE speed opens on this gripper (from official example)
+        cmd = Base_pb2.GripperCommand()
+        cmd.mode = Base_pb2.GRIPPER_SPEED
+        finger = cmd.gripper.finger.add()
+        finger.finger_identifier = 1
+        finger.value = -0.10  # negative closes slowly
+        base.SendGripperCommand(cmd)
+        
+        start_time = time.time()
+        last_pos = 0.0
+        position_stable_count = 0
+        force_approaching = False
+        
+        # Clear serial buffer to get fresh readings
+        ser.reset_input_buffer()
+        
+        while True:  # Keep closing until force threshold or fully closed
+            # Get gripper position
+            req = Base_pb2.GripperRequest()
+            req.mode = Base_pb2.GRIPPER_POSITION
+            meas = base.GetMeasuredGripperMovement(req)
+            current_pos = 0.0
+            if len(meas.finger):
+                current_pos = meas.finger[0].value
+                print(f"Gripper pos: {current_pos:.3f}", end="")
+                
+                # Check if gripper has stopped moving (object detected)
+                if abs(current_pos - last_pos) < 0.001:
+                    position_stable_count += 1
+                    if position_stable_count > 15 and current_pos > 0.1:
+                        print(" - Object contacted")
+                else:
+                    position_stable_count = 0
+                last_pos = current_pos
+                
+                # Stop if fully closed
+                if current_pos >= 0.99:
+                    print(" - Fully closed")
+                    base.Stop()
+                    return True
+            
+            # Read force data continuously
+            try:
+                line = ser.readline()
+                if line:
+                    text = line.decode('utf-8', errors='ignore').strip()
+                    if text:
+                        # Try to extract any number from the line
+                        import re
+                        match = re.search(r'(\d+(?:\.\d+)?)', text)
+                        if match:
+                            force = float(match.group(1))
+                            print(f" Force: {force}")
+                            
+                            # Stop immediately if threshold reached
+                            if force >= force_threshold:
+                                print(f"\n✓ Force threshold reached: {force}")
+                                base.Stop()
+                                # Small backoff to reduce pressure
+                                time.sleep(0.1)
+                                cmd2 = Base_pb2.GripperCommand()
+                                cmd2.mode = Base_pb2.GRIPPER_SPEED
+                                f2 = cmd2.gripper.finger.add()
+                                f2.finger_identifier = 1
+                                f2.value = 0.05  # positive opens slightly to relieve pressure
+                                base.SendGripperCommand(cmd2)
+                                time.sleep(0.1)
+                                base.Stop()
+                                return True
+                            
+                            # Slow down even more when approaching threshold
+                            elif force > force_threshold * 0.7 and not force_approaching:
+                                print(f" - Slowing down (force approaching threshold)")
+                                force_approaching = True
+                                cmd_slow = Base_pb2.GripperCommand()
+                                cmd_slow.mode = Base_pb2.GRIPPER_SPEED
+                                f_slow = cmd_slow.gripper.finger.add()
+                                f_slow.finger_identifier = 1
+                                f_slow.value = -0.05  # smaller negative keeps closing slowly
+                                base.SendGripperCommand(cmd_slow)
+                        else:
+                            print(f" [info: {text}]")
+                else:
+                    print("")  # New line if no serial data
+            except Exception as e:
+                print(f" [serial error: {e}]")
+            
+            time.sleep(0.02)  # Faster polling for quicker response
+        
+        # This should never be reached since we only exit via force threshold or fully closed
+        base.Stop()
+        return True
+    
+    # No force sensor - just close normally
+    else:
+        print("Closing gripper (no force sensor)...")
+        cmd = Base_pb2.GripperCommand()
+        cmd.mode = Base_pb2.GRIPPER_POSITION
+        finger = cmd.gripper.finger.add()
+        finger.finger_identifier = 1
+        finger.value = position
+        base.SendGripperCommand(cmd)
+        time.sleep(3)
+        return True
 
 def main():
     import argparse
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
     import utilities
 
-    # Parse arguments
     parser = argparse.ArgumentParser()
     args = utilities.parseConnectionArguments(parser)
 
-    # Create connection to the device and get the router
     with utilities.DeviceConnection.createTcpConnection(args) as router:
-        # Create Base client from router (required to send commands)
         base = BaseClient(router)
 
         # Your exact waypoints
         first_route = (
-            (0.497, -0.024, 0.263, 0.0, 98.035,  4.639, 123.538),  # 1: approach
-            (0.495, -0.023, 0.189, 0.0, 102.728, -3.498, 123.519), # 2: lower (grip here)
-            (0.460, -0.170, 0.325, 0.0, 94.091, 11.431, 105.063),  # 3: lift
-            (0.462, -0.171, 0.169, 0.0, 103.837, -5.858, 105.634), # 4: place (optional)
-            (0.465, -0.174, 0.277, 0.0, 97.079, 6.004, 105.651),   # 5: lift after place (optional)
+            (0.497, -0.024, 0.263, 0.0, 98.035,  4.639, 123.538),  # First Position test 
+            (0.497, -0.024, 0.263, 0.0, 81.9, 178.3, 122.7), # Ball Action 1
+            (0.38, 0.087, -0.036, 0.0, 72.7, -179.1, 145.4),  # Ball action 2 (close gripper after)
+            (0.471, 0.052, 0.306, 0.0, 88.7, -178.1, 137.1), # Ball Action 3
+            (0.447, -0.158, 0.306, 0.0, 88.7, -187.1, 111.4),   # Ball action 4
+            (0.384, -0.09, -0.029, 0.0, 73, 177.1, 118.2),  # Ball action 5 
+            # Let go
+            #ball action 4
+            (0.447, -0.157, 0.304, 0.0, 91.5, -8.3, 111.3),   # End Effector twist
             (0.13,  -0.068, 0.118, 0.0, 10.777, 177.812, 82.762),  # 6: Retract
         )
 
         gripper_closed = False
+        ser = None
+        
         try:
-            # Open serial connection once for all grips
-            # Make sure this matches your Arduino Serial.begin(....)
-            ser = serial.Serial('COM3', 9600, timeout=1)
-            time.sleep(2)  # Wait for Arduino to reset
+            # Open serial connection
+            try:
+                ser = serial.Serial("COM5", 9600, timeout=0.1)
+                ser.reset_input_buffer()
+                time.sleep(2)  # Arduino boot time
+                print("✓ Serial port opened")
+            except Exception as e:
+                print(f"⚠ Serial failed: {e} - continuing without force feedback")
+                ser = None
 
-            # Optional: open gripper before approach
-            print("Opening gripper...")
+            # Open gripper
             gripper_set_position(base, 0.0)
 
-            # Move to first two waypoints (approach → lower)
+            # Move to approach and lower positions
             if not execute_waypoints(base, first_route[:2]):
-                ser.close()
                 return 1
 
-            # Close gripper with touch-then-force behavior
-            print("Starting touch-then-force gripping using Arduino force sensor...")
+            # Close with force feedback
             FORCE_THRESHOLD = 500
             if gripper_set_position(base, 1.0, force_threshold=FORCE_THRESHOLD, ser=ser):
                 gripper_closed = True
+                print("✓ Object gripped with force control")
             else:
-                print("Warning: Gripper touch/force phase did not confirm threshold")
+                print("⚠ Force threshold not reached, but continuing")
+                gripper_closed = True
 
-            # Execute the next waypoints (lift → place)
+            # Lift and move to place position
             if not execute_waypoints(base, first_route[2:4]):
-                ser.close()
                 return 1
 
-            # Brief settle before release to ensure stability at place pose
             time.sleep(0.5)
 
-            print("Opening gripper to release...")
+            # Release
             gripper_set_position(base, 0.0)
             gripper_closed = False
 
-            # Lift-away after release (waypoint 5) to clear above the placed object
+            # Lift away
             if not execute_waypoints(base, [first_route[4]]):
-                ser.close()
                 return 1
 
-            # Return to the place pose (waypoint 4) to re-pick the object
+            # Return to place position to re-pick
             if not execute_waypoints(base, [first_route[3]]):
-                ser.close()
                 return 1
 
-            print("Closing gripper to re-pick at place (touch-then-force)...")
+            # Re-grip with force feedback
             if gripper_set_position(base, 1.0, force_threshold=FORCE_THRESHOLD, ser=ser):
                 gripper_closed = True
+                print("✓ Re-gripped with force control")
             else:
-                print("Warning: Re-pick touch/force phase did not confirm threshold")
+                print("⚠ Force threshold not reached on re-grip")
+                gripper_closed = True
 
-            # Transit back to the original area: go to original lift (waypoint 3)
-            if not execute_waypoints(base, [first_route[2]]):
-                ser.close()
+            # Move back to original position
+            if not execute_waypoints(base, [first_route[2], first_route[1]]):
                 return 1
 
-            # Lower to the original lower pose (waypoint 2) to re-place at origin
-            if not execute_waypoints(base, [first_route[1]]):
-                ser.close()
-                return 1
-
-            # Brief settle before re-release
             time.sleep(0.5)
 
-            print("Opening gripper to release at original location...")
+            # Final release
             gripper_set_position(base, 0.0)
             gripper_closed = False
 
-            # Lift back up to original lift (waypoint 3) to clear
-            if not execute_waypoints(base, [first_route[2]]):
-                ser.close()
+            # Retract
+            if not execute_waypoints(base, [first_route[2], first_route[5]]):
                 return 1
 
-            # Finally, retract to safe pose (waypoint 6)
-            if not execute_waypoints(base, [first_route[5]]):
-                ser.close()
-                return 1
-
-            print("Done.")
-            ser.close()
+            print("✓ Complete")
             return 0
+            
         finally:
-            # Ensure the gripper is opened at the end even if an error occurred after closing
+            if ser:
+                ser.close()
             if gripper_closed:
                 try:
-                    print("Finalizing: opening gripper at end...")
                     gripper_set_position(base, 0.0)
-                except Exception as e:
-                    print(f"Finalization gripper open failed: {e}")
+                except:
+                    pass
 
 if __name__ == "__main__":
     sys.exit(main())

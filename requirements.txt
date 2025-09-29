@@ -17,6 +17,7 @@ tqdm                 # Progress bars
 scipy                # Scientific computing
 seaborn              # Statistical plotting (YOLOv5 uses this)
 thop                 # FLOP counting (YOLOv5 model analysis)
+pyserial            # Serial comms (import as 'serial')
 
 # Optional depth camera support (uncomment as needed)
 # pyrealsense2      # Intel RealSense cameras

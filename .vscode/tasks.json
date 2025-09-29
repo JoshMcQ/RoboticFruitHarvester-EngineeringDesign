@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run test2.py (no-fallback, verbose)",
+			"type": "shell",
+			"command": "c:\\Users\\JoshMcQueary\\RoboticFruitHarvester-EngineeringDesign\\venv\\Scripts\\python.exe",
+			"args": [
+				"c:\\Users\\JoshMcQueary\\RoboticFruitHarvester-EngineeringDesign\\Kinova\\test2.py",
+				"--serial-timeout",
+				"0.2"
+			],
+			"problemMatcher": [
+				"$eslint - stylish"
+			],
+			"group": "build"
+		}
+	]
+}
