@@ -202,7 +202,7 @@ def main():
         base = BaseClient(router)
 
         # Your exact waypoints
-        first_route = (
+        ball_action = (
             (0.497, -0.024, 0.263, 0.0, 98.035,  4.639, 123.538),  # First Position test 
             (0.497, -0.024, 0.263, 0.0, 81.9, 178.3, 122.7), # Ball Action 1
             (0.38, 0.087, -0.036, 0.0, 72.7, -179.1, 145.4),  # Ball action 2 (close gripper after)
@@ -210,7 +210,7 @@ def main():
             (0.447, -0.158, 0.306, 0.0, 88.7, -187.1, 111.4),   # Ball action 4
             (0.384, -0.09, -0.029, 0.0, 73, 177.1, 118.2),  # Ball action 5 
             # Let go
-            #ball action 4
+            # ball action 4 so ball_action[5] in code
             (0.447, -0.157, 0.304, 0.0, 91.5, -8.3, 111.3),   # End Effector twist
             (0.13,  -0.068, 0.118, 0.0, 10.777, 177.812, 82.762),  # 6: Retract
         )
@@ -220,7 +220,7 @@ def main():
         
         try:
             # Open serial connection
-            try:
+            try: # Kris change COM5 to COM3 on your computer
                 ser = serial.Serial("COM5", 9600, timeout=0.1)
                 ser.reset_input_buffer()
                 time.sleep(2)  # Arduino boot time
@@ -233,7 +233,7 @@ def main():
             gripper_set_position(base, 0.0)
 
             # Move to approach and lower positions
-            if not execute_waypoints(base, first_route[:2]):
+            if not execute_waypoints(base, ball_action[:2]):
                 return 1
 
             # Close with force feedback
@@ -246,7 +246,7 @@ def main():
                 gripper_closed = True
 
             # Lift and move to place position
-            if not execute_waypoints(base, first_route[2:4]):
+            if not execute_waypoints(base, ball_action[2:4]):
                 return 1
 
             time.sleep(0.5)
@@ -256,11 +256,11 @@ def main():
             gripper_closed = False
 
             # Lift away
-            if not execute_waypoints(base, [first_route[4]]):
+            if not execute_waypoints(base, [ball_action[4]]):
                 return 1
 
             # Return to place position to re-pick
-            if not execute_waypoints(base, [first_route[3]]):
+            if not execute_waypoints(base, [ball_action[3]]):
                 return 1
 
             # Re-grip with force feedback
@@ -272,7 +272,7 @@ def main():
                 gripper_closed = True
 
             # Move back to original position
-            if not execute_waypoints(base, [first_route[2], first_route[1]]):
+            if not execute_waypoints(base, [ball_action[2], ball_action[1]]):
                 return 1
 
             time.sleep(0.5)
@@ -282,7 +282,7 @@ def main():
             gripper_closed = False
 
             # Retract
-            if not execute_waypoints(base, [first_route[2], first_route[5]]):
+            if not execute_waypoints(base, [ball_action[2], ball_action[5]]):
                 return 1
 
             print("✓ Complete")
