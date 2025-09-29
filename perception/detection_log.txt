@@ -1,0 +1,6 @@
+2025-09-21 17:58:04 | Confidence: 0.61 | Class ID: 0 | Position (x, y, z): (0.034, 0.036, 0.241)
+2025-09-21 17:58:05 | Confidence: 0.60 | Class ID: 0 | Position (x, y, z): (0.029, 0.036, 0.241)
+2025-09-21 17:58:54 | Confidence: 0.73 | Class ID: 0 | Position (x, y, z): (0.035, 0.046, 0.241)
+2025-09-21 17:58:55 | Confidence: 0.65 | Class ID: 0 | Position (x, y, z): (0.028, 0.046, 0.241)
+2025-09-21 17:59:46 | Confidence: 0.57 | Class ID: 0 | Position (x, y, z): (0.026, 0.033, 0.241)
+2025-09-21 17:59:47 | Confidence: 0.61 | Class ID: 0 | Position (x, y, z): (0.028, 0.034, 0.241)
