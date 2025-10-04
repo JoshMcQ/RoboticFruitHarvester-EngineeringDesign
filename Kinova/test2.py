@@ -10,11 +10,32 @@ from kortex_api.autogen.messages import Base_pb2
 
 TIMEOUT_DURATION = 30.0
 
+
+def log_pose_and_joints(base: BaseClient, context: str):
+    try:
+        pose = base.GetMeasuredCartesianPose()
+        print(f"{context} pose (base frame): "
+              f"x={pose.x:.3f}, y={pose.y:.3f}, z={pose.z:.3f}, "
+              f"θx={pose.theta_x:.3f}, θy={pose.theta_y:.3f}, θz={pose.theta_z:.3f}")
+    except Exception as e:
+        print(f"{context} pose unavailable: {e}")
+
+    try:
+        joints = base.GetMeasuredJointAngles()
+        joint_vals = ", ".join(
+            f"J{idx + 1}={angle.value:.3f}"
+            for idx, angle in enumerate(joints.joint_angles)
+        )
+        print(f"{context} joints: {joint_vals}")
+    except Exception as e:
+        print(f"{context} joints unavailable: {e}")
+
 def check_for_end_or_abort(e):
     def _cb(notif, e=e):
         print("EVENT:", Base_pb2.ActionEvent.Name(notif.action_event))
         if notif.action_event in (Base_pb2.ACTION_END, Base_pb2.ACTION_ABORT):
             e.set()
+
     return _cb
 
 def populate_cartesian(waypoint):
@@ -201,18 +222,19 @@ def main():
     with utilities.DeviceConnection.createTcpConnection(args) as router:
         base = BaseClient(router)
 
-        # Your exact waypoints
+        # Updated cartesian waypoints (x, y, z, blending, θx, θy, θz)
+        # Coordinates tuned for: pick at (0.403, 0.081) and place at (0.391, 0.090)
         ball_action = (
-            (0.497, -0.024, 0.263, 0.0, 98.035,  4.639, 123.538),  # First Position test 
-            (0.497, -0.024, 0.263, 0.0, 81.9, 178.3, 122.7), # Ball Action 1
-            (0.38, 0.087, -0.036, 0.0, 72.7, -179.1, 145.4),  # Ball action 2 (close gripper after)
-            (0.471, 0.052, 0.306, 0.0, 88.7, -178.1, 137.1), # Ball Action 3
-            (0.447, -0.158, 0.306, 0.0, 88.7, -187.1, 111.4),   # Ball action 4
-            (0.384, -0.09, -0.029, 0.0, 73, 177.1, 118.2),  # Ball action 5 
-            # Let go
-            # ball action 4 so ball_action[5] in code
-            (0.447, -0.157, 0.304, 0.0, 91.5, -8.3, 111.3),   # End Effector twist
-            (0.13,  -0.068, 0.118, 0.0, 10.777, 177.812, 82.762),  # 6: Retract
+            (0.391, 0.090, 0.113, 0.0, 10.722, 177.924, 82.692),   # 0: Pick approach (high)
+            (0.391, 0.090, -0.011, 0.0, 10.748, 177.957, 82.756),  # 1: Pick descend (grip)
+            (0.391, 0.090, 0.107, 0.0, 10.644, 177.900, 82.593),   # 2: Pick retreat (lift)
+            (0.423, -0.353, 0.102, 0.0, 11.014, 177.982, 82.730),   # 3: Place approach (high)
+            (0.428, -0.357, -0.012, 0.0, 10.762, 177.776, 82.769),
+            (0.422, -0.352, 0.113, 0.0, 10.975, 177.962, 82.693),
+            (0.403, 0.081, 0.117, 0.0, 10.742, 177.961, 82.753),   # 6: Rise for clearance
+            (0.403, 0.081, -0.022, 0.0, 10.74, 177.978, 82.745),
+            (0.403, 0.081, 0.129, 0.0, 10.733, 177.937, 82.720),  
+            (0.13, -0.068, 0.118, 0.0, 10.777, 177.812, 82.762),# 6: Retract 
         )
 
         gripper_closed = False
@@ -220,72 +242,108 @@ def main():
         
         try:
             # Open serial connection
-            try: # Kris change COM5 to COM3 on your computer
+            try:
                 ser = serial.Serial("COM5", 9600, timeout=0.1)
                 ser.reset_input_buffer()
-                time.sleep(2)  # Arduino boot time
+                time.sleep(2)
                 print("✓ Serial port opened")
             except Exception as e:
                 print(f"⚠ Serial failed: {e} - continuing without force feedback")
                 ser = None
 
-            # Open gripper
+            FORCE_THRESHOLD = 500
+
+            # === PICK SEQUENCE ===
+            print("\n=== Step 1: Opening gripper ===")
             gripper_set_position(base, 0.0)
 
-            # Move to approach and lower positions
-            if not execute_waypoints(base, ball_action[:2]):
+            print("\n=== Step 2: Move above pick (waypoint 0) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[0]]):
                 return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
 
-            # Close with force feedback
-            FORCE_THRESHOLD = 500
+            print("\n=== Step 3: Descend to pick (waypoint 1) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[1]]):
+                return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
+
+            print("\n=== Step 4: Closing gripper with force control ===")
             if gripper_set_position(base, 1.0, force_threshold=FORCE_THRESHOLD, ser=ser):
                 gripper_closed = True
                 print("✓ Object gripped with force control")
             else:
-                print("⚠ Force threshold not reached, but continuing")
+                print("⚠ Force threshold not reached, continuing with caution")
                 gripper_closed = True
 
-            # Lift and move to place position
-            if not execute_waypoints(base, ball_action[2:4]):
+            print("\n=== Step 5: Lift from pick (waypoint 2) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[2]]):
                 return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
 
-            time.sleep(0.5)
-
-            # Release
-            gripper_set_position(base, 0.0)
-            gripper_closed = False
-
-            # Lift away
-            if not execute_waypoints(base, [ball_action[4]]):
-                return 1
-
-            # Return to place position to re-pick
+            # === PLACE SEQUENCE ===
+            print("\n=== Step 6: Move above place (waypoint 3) ===")
+            log_pose_and_joints(base, "Current before waypoint")
             if not execute_waypoints(base, [ball_action[3]]):
                 return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
 
-            # Re-grip with force feedback
-            if gripper_set_position(base, 1.0, force_threshold=FORCE_THRESHOLD, ser=ser):
-                gripper_closed = True
-                print("✓ Re-gripped with force control")
-            else:
-                print("⚠ Force threshold not reached on re-grip")
-                gripper_closed = True
-
-            # Move back to original position
-            if not execute_waypoints(base, [ball_action[2], ball_action[1]]):
+            print("\n=== Step 7: Lower to place (waypoint 4) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[4]]):
                 return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
 
-            time.sleep(0.5)
+            time.sleep(0.3)
 
-            # Final release
+            print("\n=== Step 8: Opening gripper to release ===")
             gripper_set_position(base, 0.0)
             gripper_closed = False
 
-            # Retract
-            if not execute_waypoints(base, [ball_action[2], ball_action[5]]):
+            print("\n=== Step 9: Retreat from place (waypoint 5) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[5]]):
                 return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
 
-            print("✓ Complete")
+            # === CLEARANCE AND RETRACT ===
+            print("\n=== Step 10: Clear path (high) (waypoint 6) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[6]]):
+                return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
+
+            print("\n=== Step 11: Clear path (transition) (waypoint 7) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[7]]):
+                return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
+
+            print("\n=== Step 12: Retract to home (waypoint 8) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[8]]):
+                return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
+
+            print("\n=== Step 13: Final retract to home (waypoint 9) ===")
+            log_pose_and_joints(base, "Current before waypoint")
+            if not execute_waypoints(base, [ball_action[9]]):
+                return 1
+            print("✓ Waypoint execution reported ACTION_END")
+            log_pose_and_joints(base, "Reached waypoint")
+
+            print("\n✓ Complete")
             return 0
             
         finally:
