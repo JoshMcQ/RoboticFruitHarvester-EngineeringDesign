@@ -1,8 +1,20 @@
 
-import cv2, torch, numpy as np, json, os
+import os
+import json
+
+import cv2
+import numpy as np
+import torch
+
+try:
+    from .vision_calibration import CalibrationError, VisionToBaseCalibration
+except ImportError:  # pragma: no cover - fallback for script execution
+    from vision_calibration import CalibrationError, VisionToBaseCalibration
 
 # --- Load calibration from file if available ---
 CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), '..', 'camera_calibration_latest.json')
+VISION_CALIBRATION_FILE = os.path.join(os.path.dirname(__file__), 'vision_to_base_calibration.json')
+
 K = np.array([[600.0, 0.0, 320.0],
               [0.0, 600.0, 240.0],
               [0.0,   0.0,   1.0]], dtype=float)   # fx,fy,cx,cy
@@ -10,6 +22,7 @@ DIST_COEFFS = np.zeros((5,))
 T_base_cam = np.eye(4, dtype=float)                # 4x4 cam->base
 Z_TABLE_M = 0.241                                   # assume objects ~9.5 inches away
 DEPTH_SCALE = 0.001                                 # units->m (e.g., RealSense)
+_VISION_CALIBRATION: VisionToBaseCalibration | None = None
 
 def load_calibration():
     global K, DIST_COEFFS
@@ -21,6 +34,24 @@ def load_calibration():
         print(f"Loaded calibration from {CALIBRATION_FILE}")
     else:
         print("Calibration file not found, using default K.")
+
+
+def load_vision_transform():
+    global _VISION_CALIBRATION, T_base_cam, Z_TABLE_M, K
+    try:
+        calib = VisionToBaseCalibration.from_json(VISION_CALIBRATION_FILE)
+        _VISION_CALIBRATION = calib
+        T_base_cam = calib.transform_matrix
+        Z_TABLE_M = float(calib.table_height_m)
+        if not np.allclose(K, calib.camera_matrix):
+            K = calib.camera_matrix.copy()
+        print(
+            "Loaded vision-to-base calibration:"
+            f" {len(calib.sample_errors_m)} samples, RMSE={calib.reprojection_rmse_m:.4f} m"
+        )
+    except CalibrationError as exc:
+        print(f"Vision-to-base calibration unavailable: {exc}")
+        _VISION_CALIBRATION = None
 
 def calibration_status():
     if os.path.exists(CALIBRATION_FILE):
