@@ -66,6 +66,75 @@ def close_with_force_feedback(arm: XArmAPI) -> None:
 		for position in range(500, -1, -50):
 			arm.set_gripper_position(position, wait=True)
 
+# Smooth, adaptive, debounced close (works with your XArmAPI)
+def smooth_close_with_force(arm: XArmAPI, ser: serial.Serial,
+                            threshold=FORCE_THRESHOLD,
+                            start=850, end=0):
+    import math, time
+
+    # --- Tunables ---
+    EMA_ALPHA     = 0.25    # force smoothing (0..1)
+    BASE_STEP     = 18      # coarse step far from contact
+    MIN_STEP      = 4       # tiny step near contact
+    V_MAX         = 9000    # r/min, far from contact
+    V_MIN         = 1200    # r/min, near contact
+    SAMPLE_DT     = 0.004   # s, force poll cadence
+    WINDOW_S      = 0.03    # s, per-step window
+    HITS_NEEDED   = 1       # debounce (filtered samples ≥ threshold)
+    HYST_RATIO    = 0.92    # drop below this to clear hits
+    DWELL_S       = 0.015   # brief settle to avoid stick-slip
+
+    def smoothstep01(x):
+        x = 0.0 if x < 0 else (1.0 if x > 1 else x)
+        return x*x*(3 - 2*x)
+
+    # Ensure gripper is on and in position (location) mode
+    try:
+        arm.set_gripper_enable(True)
+        arm.set_gripper_mode(0)  # location mode
+    except Exception:
+        pass  # safe to proceed if firmware already set
+
+    f_ema, hits = 0.0, 0
+    pos = start
+    while pos >= end:
+        # Contact likelihood from filtered force → adaptive step & speed
+        f_ratio = f_ema / max(1e-6, float(threshold))
+        s = smoothstep01(f_ratio)                   # 0 (far) → 1 (at contact)
+        step  = int(max(MIN_STEP, BASE_STEP*(1 - 0.8*s)))
+        speed = int(V_MIN + (V_MAX - V_MIN)*(1 - s))
+
+        # Command motion toward target pos (non-blocking)
+        arm.set_gripper_position(pos, wait=False, speed=speed)
+
+        t_end, got, last_val = time.time() + WINDOW_S, 0, None
+        while time.time() < t_end:
+            v = read_force(ser, timeout=SAMPLE_DT)
+            if v is not None and not (isinstance(v, float) and math.isnan(v)):
+                last_val = v
+                got += 1
+                f_ema = EMA_ALPHA*v + (1-EMA_ALPHA)*f_ema
+                if f_ema >= threshold:
+                    hits += 1
+                    if hits >= HITS_NEEDED:
+                        print(f"[force] pos={pos} ema={f_ema:.2f} -> smooth stop")
+                        # No explicit stop API; hold softly at current pos:
+                        arm.set_gripper_position(pos, wait=True, speed=max(V_MIN, 800))
+                        return
+                elif f_ema < threshold*HYST_RATIO:
+                    hits = 0
+            time.sleep(SAMPLE_DT)
+
+        if got == 0:
+            print(f"[force] pos={pos} no reading")
+        else:
+            print(f"[force] pos={pos} ema={f_ema:.2f} speed={speed} step={step}")
+
+        time.sleep(DWELL_S)
+        pos -= step
+
+    print("[force] Completed sweep without reaching threshold.")
+    arm.set_gripper_position(end, wait=True, speed=V_MIN)
 
 
 # arm = XArmAPI('192.168.1.202')
@@ -80,7 +149,7 @@ arm.reset(wait=True)
 arm.set_gripper_position(850, wait=True)
 arm.set_position(*[347.2, -172.3, 237.3, 179.9, 0, 0.6], wait=True)##
 arm.set_position(*[372.9, -185.7, 81.5, 180, 0, 0.5], wait=True)
-close_with_force_feedback(arm)
+smooth_close_with_force(arm, ser:=serial.Serial(FORCE_PORT, FORCE_BAUD, timeout=0.5))
 #arm.set_gripper_position(300, wait=True)
 
 #set tcp payload

@@ -47,15 +47,16 @@ print('set gripper enable, code={}'.format(code))
 code = arm.set_gripper_speed(5000)
 print('set gripper speed, code={}'.format(code))
 
-code = arm.set_gripper_position(600, wait=True)
+code = arm.set_gripper_position(600, wait=False)
 print('[wait]set gripper pos, code={}'.format(code))
 
-code = arm.set_gripper_position(300, wait=True, speed=8000)
-print('[no wait]set gripper pos, code={}'.format(code))
+#code = arm.set_gripper_position(200, wait=False, speed=8000)
+#print('[no wait]set gripper pos, code={}'.format(code))
 
 FORCE_PORT = "COM5"
 FORCE_BAUD = 9600
 FORCE_THRESHOLD = 480.0  # adjust based on sensor units
+
 
 
 def read_force(ser: serial.Serial) -> float | None:
@@ -91,4 +92,4 @@ def close_with_force_feedback(arm: XArmAPI) -> None:
 			arm.set_gripper_position(position, wait=True)
 
 
-close_with_force_feedback(arm)
+#close_with_force_feedback(arm)
