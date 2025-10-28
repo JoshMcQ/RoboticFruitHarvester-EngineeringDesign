@@ -1,0 +1,27 @@
+# YOLOv5 Fruit Detection Requirements with CUDA Support
+# Install with: pip install -r yolo_requirements.txt
+
+# Core dependencies with CUDA 12.1 support
+--index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio
+
+# Computer vision & camera
+opencv-python
+depthai
+
+# Data processing
+numpy
+pandas
+pillow
+
+# YOLOv5 dependencies
+pyyaml
+requests
+matplotlib
+seaborn
+
+# Optional but recommended
+scikit-image
+scipy

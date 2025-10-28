@@ -1,0 +1,14 @@
+files__pycache__/
+.idea
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+.vscode/
+*.old.*
+*.old
+*.patch
+proj
+rs_ggcnn_demo
+ggcnn_grasping_demo/tmp.txt
