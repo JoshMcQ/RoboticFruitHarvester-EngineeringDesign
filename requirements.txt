@@ -1,21 +1,32 @@
-# Core dependencies
+# YOLOv5 Fruit Detection with OAK-D Camera
+# For CUDA support, install PyTorch from: https://pytorch.org/get-started/locally/
+# Or use: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Core ML/Vision (CUDA support recommended)
 torch
 torchvision
+torchaudio
+
+# Computer Vision & Camera
 opencv-python
-numpy
-
-# YOLOv5 dependencies
-pandas
-Pillow
-PyYAML
-requests
-scipy
-tqdm
-matplotlib
-seaborn
-
-# OAK-D camera
 depthai
 
-# Optional but recommended
-ipython  # for better debugging
+# Data Processing
+numpy
+pandas
+pillow
+scipy
+
+# YOLOv5 Dependencies
+pyyaml
+requests
+matplotlib
+seaborn
+tqdm
+
+# Robot Control
+xarm-python-sdk
+
+# Optional but Recommended
+ipython
+scikit-image
