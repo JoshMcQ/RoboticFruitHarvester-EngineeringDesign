@@ -13,8 +13,8 @@ CAM_WIDTH = 640
 CAM_HEIGHT = 400
 DISABLE_RGB = True
 
-#MODEL_FILE = 'models/ggcnn_epoch_23_cornell'    # GGCNN
-MODEL_FILE = 'models/epoch_50_cornell'          # GGCNN2
+MODEL_FILE = 'models/ggcnn_epoch_23_cornell'    # GGCNN
+# MODEL_FILE = 'models/epoch_50_cornell'          # GGCNN2
 # use open-loop solution when robot height is over OPEN_LOOP_HEIGHT
 OPEN_LOOP_HEIGHT = 500 # mm
 GGCNN_IN_THREAD = False
@@ -27,26 +27,24 @@ EULER_COLOR_TO_DEPTH_OPT = [0.0375, 0, 0, 0, 0, 0]
 # If it exceeds the range, it will return to the initial detection position.
 GRASPING_RANGE = [180, 600, -200, 200] # [x_min, x_max, y_min, y_max]
 
-# initial detection position (raised 90mm to match fixture)
-DETECT_XYZ = [300, 0, 490] # [x, y, z]
+# initial detection position
+DETECT_XYZ = [300, 0, 400] # [x, y, z]
 
-# release grasping pos (raised by same offset)
-RELEASE_XYZ = [400, 400, 360]
+# release grasping pos
+RELEASE_XYZ = [400, 400, 270]
 
 # lift offset based on DETECT_XYZ[2] after grasping or release
 LIFT_OFFSET_Z = 100 # lift_height = DETECT_XYZ[2] + LIFT_OFFSET_Z
 
 # The distance between the gripping point of the robot grasping and the end of the robot arm flange
 # The value needs to be fine-tuned according to the actual situation.
-# The distance between the gripping point of the robot grasping and the end of the robot arm flange
-# The value needs to be fine-tuned according to the actual situation.
-GRIPPER_Z_MM = 70 # mm
+GRIPPER_Z_MM = 150 # mm
 
-# minimum z for grasping (shop floor height)
-GRASPING_MIN_Z = 76 # mm
+# minimum z for grasping
+GRASPING_MIN_Z = 175 # mm
 
-MOVE_SPEED = 100
-MOVE_ACC = 500
+MOVE_SPEED = 200
+MOVE_ACC = 1000
 
 DETECT_STEPS = 2
 

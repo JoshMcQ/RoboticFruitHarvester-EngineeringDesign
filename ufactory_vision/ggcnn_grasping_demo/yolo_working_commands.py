@@ -120,27 +120,6 @@ def median_valid_depth(depth_img, cx, cy, k=3):
 def _clamp(v, lo, hi):
 	return max(lo, min(hi, v))
 
-def _get_current_pose(arm: XArmAPI):
-	"""Best-effort read of current [x,y,z,roll,pitch,yaw] in mm/deg.
-	Falls back to OBS_POSE if unavailable.
-	"""
-	try:
-		res = arm.get_position()
-		data = None
-		if isinstance(res, dict) and 'data' in res:
-			data = res.get('data')
-		elif isinstance(res, (list, tuple)):
-			# Some SDKs return (code, data)
-			if len(res) >= 2 and isinstance(res[1], (list, tuple)):
-				data = res[1]
-			elif len(res) >= 6 and all(isinstance(v, (int, float)) for v in res[:6]):
-				data = res[:6]
-		if data and len(data) >= 6:
-			return [float(data[0]), float(data[1]), float(data[2]), float(data[3]), float(data[4]), float(data[5])]
-	except Exception:
-		pass
-	return OBS_POSE
-
 def pick_last_estimate(arm: XArmAPI, est: dict):
 	"""Pick sequence using last_est (expects keys 'xr','yr','zr')."""
 	x = float(est['xr']); y = float(est['yr']); z_obj = float(est['zr'])
@@ -178,93 +157,6 @@ def pick_last_estimate(arm: XArmAPI, est: dict):
 		except Exception:
 			pass
 
-def refine_at_hover(arm: XArmAPI, est: dict, cam: DepthAiCamera, model, Kd, calib_bias: np.ndarray):
-	"""Move laterally to target XY keeping current Z, re-detect, and recompute coordinates.
-	Returns updated estimate dict (same schema as last_est) or None if failed.
-	"""
-	try:
-		x = float(est['xr']); y = float(est['yr']); z_obj = float(est['zr'])
-	except Exception:
-		print("Invalid last estimate; cannot refine.")
-		return None
-
-	# Keep current Z and orientation; only move in XY
-	cur_pose = _get_current_pose(arm)
-	cur_z = float(cur_pose[2])
-	roll, pitch, yaw = float(cur_pose[3]), float(cur_pose[4]), float(cur_pose[5])
-
-	try:
-		# Move to target XY at current Z (no Z motion)
-		arm.set_position(x, y, cur_z, roll, pitch, yaw, wait=True)
-		time.sleep(0.3)  # small settle
-
-		prev_cx = int(est.get('cx', 0)); prev_cy = int(est.get('cy', 0))
-
-		best_est = None
-		t_end = time.time() + 2.0  # up to 2 seconds to refine
-		while time.time() < t_end:
-			color, depth = cam.get_images()
-			if color is None:
-				continue
-			with torch.no_grad():
-				results = model(color)
-			df = results.pandas().xyxy[0]
-			if df is None or df.empty:
-				continue
-
-			# Prefer detection closest to previous pixel center
-			df = df.copy()
-			df['cx'] = (df['xmin'] + df['xmax']) / 2.0
-			df['cy'] = (df['ymin'] + df['ymax']) / 2.0
-			df['dist2'] = (df['cx'] - prev_cx) ** 2 + (df['cy'] - prev_cy) ** 2
-			df = df.sort_values(['dist2', 'confidence'], ascending=[True, False])
-			sel = df.iloc[0]
-			cx = int(sel['cx']); cy = int(sel['cy'])
-
-			# Depth at new location
-			depth_m = None
-			if depth is not None and 0 <= cy < depth.shape[0] and 0 <= cx < depth.shape[1]:
-				d = depth[cy, cx]
-				if np.isfinite(d):
-					depth_m = float(d)
-				else:
-					depth_m = median_valid_depth(depth, cx, cy, k=3)
-			if depth_m is None:
-				continue
-
-			# Compute camera 3D
-			x_cam, y_cam, z_cam = pixel_to_3d(cx, cy, depth_m, Kd)
-			# Use current EEF pose (after XY move, same Z) for transform
-			eef_pose = [x, y, cur_z, roll, pitch, yaw]
-			xr_raw, yr_raw, zr_raw = camera_to_robot(x_cam, y_cam, z_cam, eef_pose)
-			xr, yr, zr = (np.array([xr_raw, yr_raw, zr_raw]) + calib_bias).tolist()
-
-			name = sel['name'] if 'name' in sel else 'object'
-			conf = float(sel['confidence']) if 'confidence' in sel else 0.0
-			best_est = {
-				'cx': cx, 'cy': cy, 'depth_m': depth_m,
-				'x_cam': x_cam, 'y_cam': y_cam, 'z_cam': z_cam,
-				'xr': xr, 'yr': yr, 'zr': zr,
-				'xr_raw': xr_raw, 'yr_raw': yr_raw, 'zr_raw': zr_raw,
-				'name': name, 'conf': conf,
-			}
-			break
-
-		if best_est is not None:
-			print("\n=== Refined at hover ===")
-			print(f"Detection: {best_est['name']} (conf {best_est['conf']:.2f})")
-			print(f"Pixel:     ({best_est['cx']}, {best_est['cy']})  depth: {best_est['depth_m']:.3f} m")
-			print(f"Camera3D:  x={best_est['x_cam']:.3f} m  y={best_est['y_cam']:.3f} m  z={best_est['z_cam']:.3f} m")
-			print(f"RobotXYZ(raw): X={best_est['xr_raw']:.1f} mm  Y={best_est['yr_raw']:.1f} mm  Z={best_est['zr_raw']:.1f} mm")
-			print(f"RobotXYZ(cal): X={best_est['xr']:.1f} mm  Y={best_est['yr']:.1f} mm  Z={best_est['zr']:.1f} mm")
-		else:
-			print("Refine at hover failed (no valid detection).")
-
-		return best_est
-	except Exception as e:
-		print(f"Refine at hover error: {e}")
-		return None
-
 def main_once():
 	# --- Args: optional calibration biases (mm) ---
 	parser = argparse.ArgumentParser(description='Manual YOLO with coordinate printout')
@@ -278,7 +170,7 @@ def main_once():
 	if np.any(calib_bias != 0.0):
 		print(f"Using calibration bias (mm): dx={args.dx:.1f}, dy={args.dy:.1f}, dz={args.dz:.1f}")
 	if not args.verbose:
-		print("Quiet mode: Press 'v' verbose, 'i' snapshot, 'h' hover-refine, 'p' pick, 's' save, 'q' quit.")
+		print("Quiet mode: no per-frame console spam. Press 'v' to toggle verbose, 'i' to print current estimate, 'p' to pick, 'q' to quit.")
 	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 	print(f"Device: {device}")
 
@@ -397,13 +289,6 @@ def main_once():
 			else:
 				print("Executing pick on last estimate (press q to abort loop)…")
 				pick_last_estimate(arm, last_est)
-		elif key == ord('h'):
-			if last_est is None:
-				print("No estimate yet; can't hover-refine.")
-			else:
-				new_est = refine_at_hover(arm, last_est, cam, model, Kd, calib_bias)
-				if new_est is not None:
-					last_est = new_est
 		elif key == ord('v'):
 			verbose = not verbose
 			state = 'ON' if verbose else 'OFF'
