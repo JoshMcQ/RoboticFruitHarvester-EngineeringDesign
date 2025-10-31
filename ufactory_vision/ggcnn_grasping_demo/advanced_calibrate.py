@@ -48,13 +48,14 @@ EULER_EEF_TO_COLOR_OPT_INIT = [0.031, -0.016, 0.045, 0, 0, 1.5708]  # m/rad (use
 TAG_POSITIONS_MM = {
     0: [282.3,   44.6,  -89.3],  # BL
     3: [290.1, -118.3,  -89.5],  # BR
-    1: [445.4, -128.4,  -86.0],  # ML
-    5: [440.5,   45.3,  -86.3],  # MR
+    # 1 and 5 were swapped — fix them:
+    1: [440.5,   45.3,  -86.3],  # (was MR) this is the +Y one
+    5: [445.4, -128.4,  -86.0],  # (was ML) this is the -Y one
     2: [606.5,   54.0,  -83.2],  # TL
     4: [603.2, -131.6,  -81.0],  # TR
 }
 
-TAG_SIZE_M = 0.0058
+TAG_SIZE_M = 0.058
 
 # ---- Transformation functions ----
 
@@ -124,7 +125,10 @@ def camera_to_robot(x_cam_m, y_cam_m, z_cam_m, eef_pose_xyzrpy, eef_to_cam_param
     mat_base_to_eef[:3, 3] = [x_eef_mm / 1000.0, y_eef_mm / 1000.0, z_eef_mm / 1000.0]
     
     # EEF->Camera transform
-    mat_eef_to_cam = _euler_to_mat4x4(eef_to_cam_params)
+    # CRITICAL FIX: Negate tz to account for inverted Z-axis when gripper points down
+    tx, ty, tz, rx, ry, rz = eef_to_cam_params
+    params_corrected = [tx, ty, -tz, rx, ry, rz]  # Flip tz sign
+    mat_eef_to_cam = _euler_to_mat4x4(params_corrected)
     
     # Combined transform: Base->Camera = Base->EEF @ EEF->Camera
     mat_base_to_cam = mat_base_to_eef @ mat_eef_to_cam
@@ -334,7 +338,7 @@ def main():
             bounds = [
                 (-0.2, 0.2),   # tx (meters)
                 (-0.2, 0.2),   # ty
-                (-0.2, 0.5),   # tz - increased upper bound since it hit 0.2
+                (-0.5, 0.5),   # tz - allow full range since we're negating internally
             ]
             fixed_rotation = current_params[3:]  # rx, ry, rz
         else:
