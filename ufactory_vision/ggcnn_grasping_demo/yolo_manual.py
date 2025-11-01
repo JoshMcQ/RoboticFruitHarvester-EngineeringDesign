@@ -29,13 +29,23 @@ arm.set_gripper_position(850, wait=True)
 arm.set_position(*OBS_POSE, wait=True)
 
 # ---- Hand-eye (from your optimizer; meters/radians). tz is flipped inside camera_to_robot() ----
+#EULER_EEF_TO_COLOR_OPT = [
+ #   0.04863833376845415,   # tx (m)
+  # -0.04540044886615122,   # ty (m)
+   # 0.08156322113763131,   # tz (m)  <-- flipped inside transform
+   #-0.02791123564486829,   # rx (rad)
+   #-0.0035033548509433654, # ry (rad)
+   # 1.521339368142855      # rz (rad)
+#]
+
+# Use this in BOTH advanced_calibrate.py (INIT) and yolo_manual.py (FINAL)
 EULER_EEF_TO_COLOR_OPT = [
-    0.04863833376845415,   # tx (m)
-   -0.04540044886615122,   # ty (m)
-    0.08156322113763131,   # tz (m)  <-- flipped inside transform
-   -0.02791123564486829,   # rx (rad)
-   -0.0035033548509433654, # ry (rad)
-    1.521339368142855      # rz (rad)
+    0.028331345999761292,     # tx (m)  <-- new
+   -0.06602344853949635,      # ty (m)  <-- new
+    0.07552896986298417,       # tz (m)  <-- new (remember: flip once in transform)
+   -0.02791123564486829,       # rx (rad)  <-- from 9 mm run
+   -0.0035033548509433654,     # ry (rad)  <-- from 9 mm run
+    1.521339368142855          # rz (rad)  <-- from 9 mm run
 ]
 
 GRIPPER_Z_MM = 70  # info
@@ -232,9 +242,8 @@ def refine_at_hover(arm: XArmAPI, est: dict, cam: DepthAiCamera, model, Kd, cali
 
 def main_once():
     parser = argparse.ArgumentParser(description='Manual YOLO with coordinate printout (confirm before pick)')
-    parser.add_argument('--dx', type=float, default=0.0, help='Calibration bias in X (mm)')
-    parser.add_argument('--dy', type=float, default=0.0, help='Calibration bias in Y (mm)')
-    parser.add_argument('--dz', type=float, default=0.0, help='Calibration bias in Z (mm)')
+    parser.add_argument('--dy-pos', type=float, default=0.0, help='Y bias when yr_raw >= 0 (mm)')
+    parser.add_argument('--dy-neg', type=float, default=0.0, help='Y bias when yr_raw < 0 (mm)')
     parser.add_argument('--verbose', action='store_true', help='Enable periodic console prints')
     parser.add_argument('--print-every', type=float, default=2.0, help='Seconds between prints with --verbose')
     args, _ = parser.parse_known_args()

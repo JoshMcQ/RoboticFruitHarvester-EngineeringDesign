@@ -1,0 +1,31 @@
+{
+  "timestamp": "2025-11-01T16:03:50.945072",
+  "params": {
+    "tx": 0.044463261748964825,
+    "ty": -0.04506782886567454,
+    "tz": 0.08783029574857722,
+    "rx": -0.12076252054467258,
+    "ry": -0.03854854831136233,
+    "rz": 1.516948917152654
+  },
+  "stats_mm": {
+    "mean": 5.644034427820838,
+    "median": 5.337354770590432,
+    "max": 14.400671883530062,
+    "std": 2.6334520463938738
+  },
+  "args": {
+    "frames_per_pose": 25,
+    "optimize": true,
+    "verify_only": false,
+    "use_forward_transform": false,
+    "euler_order": "ZYX",
+    "optimize_translation_only": false,
+    "equalize_tags": true,
+    "huber_delta": 8.0,
+    "aggregate": "median",
+    "min_tags_per_pose": 1,
+    "results_json": "advanced_calibration_result.json",
+    "emit_python": "eef_to_color_opt.py"
+  }
+}

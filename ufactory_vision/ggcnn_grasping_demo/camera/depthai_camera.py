@@ -1,160 +1,119 @@
-import sys
+# depthai_camera.py (replace the class with this)
+
+import sys, math
 import numpy as np
 import depthai as dai
 import cv2
-import math
-
 
 class DepthAiCamera(object):
-    def __init__(self, width=640, height=400, fps=30, disable_rgb=False):
-        np.set_printoptions(threshold=sys.maxsize) # print all data in an image
-        # Closer-in minimum depth, disparity range is doubled (from 95 to 190):
+    def __init__(self, width=640, height=400, fps=30, disable_rgb=False, align_to_rgb=True):
+        np.set_printoptions(threshold=sys.maxsize)
+        self.width  = width
+        self.height = height
+        self.fps = fps
+        self.disable_rgb = disable_rgb
+        self.align_to_rgb = bool(align_to_rgb)
+
         extended_disparity = True
-        # Better accuracy for longer distance, fractional disparity 32-levels:
         subpixel = False
-        # Better handling for occlusions:
         lr_check = True
 
-        # Create pipeline
         pipeline = dai.Pipeline()
-        self.disable_rgb = disable_rgb
 
-        # Define sources and outputs
+        # ---------- RGB ----------
+        camRgb = None
         if not self.disable_rgb:
             camRgb = pipeline.create(dai.node.ColorCamera)
             xoutRgb = pipeline.create(dai.node.XLinkOut)
             xoutRgb.setStreamName("rgb")
-            # Properties
+
             camRgb.setPreviewSize(width, height)
             camRgb.setInterleaved(False)
             camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.RGB)
             camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
             camRgb.setFps(fps)
-            # Linking
             camRgb.preview.link(xoutRgb.input)
 
-        monoLeft = pipeline.create(dai.node.MonoCamera)
+        # ---------- Stereo ----------
+        monoLeft  = pipeline.create(dai.node.MonoCamera)
         monoRight = pipeline.create(dai.node.MonoCamera)
-        depth = pipeline.create(dai.node.StereoDepth)
+        stereo    = pipeline.create(dai.node.StereoDepth)
         xoutDepth = pipeline.create(dai.node.XLinkOut)
         xoutDepth.setStreamName("depth")
-        # Properties
-        monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P) # 640*400
-        monoLeft.setFps(fps)
-        monoLeft.setCamera("left")
-        monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P) # 640*400
-        monoRight.setFps(fps)
-        monoRight.setCamera("right")
 
-        # Create a node that will produce the depth map (using disparity output as it's easier to visualize depth this way)
-        depth.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
-        # Options: MEDIAN_OFF, KERNEL_3x3, KERNEL_5x5, KERNEL_7x7 (default)
-        depth.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
-        depth.setLeftRightCheck(lr_check)
-        depth.setExtendedDisparity(extended_disparity) 
-        depth.setSubpixel(subpixel)
-        # depth.initialConfig.setDisparityShift(30) #optional: set disparity shift to enhance close observation
-        # depth.initialConfig.setConfidenceThreshold(250)
-        # Linking
-        monoLeft.out.link(depth.left)
-        monoRight.out.link(depth.right)
-        depth.depth.link(xoutDepth.input) # depth unit: mm, max: 65535
-        # print(depth.initialConfig.getMaxDisparity()) # 190.0 if setExtendedDisparity(true)
+        monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+        monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+        monoLeft.setFps(fps); monoRight.setFps(fps)
+        monoLeft.setCamera("left"); monoRight.setCamera("right")
 
-        self.width = width
-        self.height = height
+        stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+        stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
+        stereo.setLeftRightCheck(lr_check)
+        stereo.setExtendedDisparity(extended_disparity)
+        stereo.setSubpixel(subpixel)
+        stereo.setRectifyEdgeFillColor(0)  # black borders for invalids
+
+        # Align depth to RGB if requested
+        if self.align_to_rgb and not self.disable_rgb:
+            stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)  # align to RGB camera
+            stereo.setOutputSize(width, height)                # make depth exactly match RGB preview size
+
+        monoLeft.out.link(stereo.left)
+        monoRight.out.link(stereo.right)
+        stereo.depth.link(xoutDepth.input)
+
+        # ---------- Boot device ----------
         self.pipeline = pipeline
-        self.depth = depth
-        self.device = dai.Device(self.pipeline)
-        # Output queue will be used to get the disparity frames from the outputs defined above
-        if not self.disable_rgb:
-            self.queRgb = self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
-        else:
-            self.queRgb = None
+        self.device   = dai.Device(self.pipeline)
         self.queDepth = self.device.getOutputQueue(name="depth", maxSize=4, blocking=False)
-    
-    def __exit__(self):
-        self.device.close()
+        self.queRgb   = None if self.disable_rgb else self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
+
+        # cache calibration and intrinsics
+        self._calib = self.device.readCalibration()
+        self._K_rgb  = np.array(self._calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_A, width, height))
+        self._K_left = np.array(self._calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_B, width, height))
+        self._K_right= np.array(self._calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_C, width, height))
+
+    def __exit__(self, *_):
+        try: self.device.close()
+        except: pass
+
+    def stop(self):
+        try: self.device.close()
+        except: pass
+
+    @property
+    def depth_aligned_to_rgb(self) -> bool:
+        # true when we requested align_to_rgb and RGB stream is enabled
+        return bool(self.align_to_rgb and not self.disable_rgb)
 
     def get_intrinsics(self):
-        calibData = self.device.readCalibration()
-        # M_rgb, width, height = calibData.getDefaultIntrinsics(dai.CameraBoardSocket.CAM_A)
-        # M_left, width, height = calibData.getDefaultIntrinsics(dai.CameraBoardSocket.CAM_B)
-        # M_Right, width, height = calibData.getDefaultIntrinsics(dai.CameraBoardSocket.CAM_C)
-
-        M_rgb = calibData.getCameraIntrinsics(dai.CameraBoardSocket.CAM_A, self.width, self.height)
-        M_left = calibData.getCameraIntrinsics(dai.CameraBoardSocket.CAM_B, self.width, self.height)
-        M_Right = calibData.getCameraIntrinsics(dai.CameraBoardSocket.CAM_C, self.width, self.height)
-        # M_Right = calibData.getCameraIntrinsics(calibData.getStereoRightCameraId(), self.width, self.height)
-
-        # M_depth = (np.array(M_left) + np.array(M_Right)) / 2
-        M_depth = np.array(M_Right)
-        return np.array(M_rgb), M_depth
-
-        # R1 = np.array(calibData.getStereoLeftRectificationRotation())
-        # R2 = np.array(calibData.getStereoRightRectificationRotation())
-
-        # H_left = np.matmul(np.matmul(M_Right, R1), np.linalg.inv(M_left))
-        # print("LEFT Camera stereo rectification matrix...")
-        # print(H_left)
-
-        # H_right = np.matmul(np.matmul(M_Right, R1), np.linalg.inv(M_Right))
-        # print("RIGHT Camera stereo rectification matrix...")
-        # print(H_right)
+        """
+        Returns:
+          K_rgb, K_depth
+        Note: if depth is aligned to RGB, K_depth == K_rgb.
+        """
+        if self.depth_aligned_to_rgb:
+            return self._K_rgb.copy(), self._K_rgb.copy()
+        else:
+            # Depth is in the rectified RIGHT camera frame by default
+            return self._K_rgb.copy(), self._K_right.copy()
 
     def get_frames(self):
         colorFrame = None
-        depthFrame = None
-
         if self.queRgb is not None:
             inRgb = self.queRgb.tryGet()
             if inRgb is not None:
                 colorFrame = inRgb.getCvFrame()
 
         inDepth = self.queDepth.tryGet()
-        if inDepth is not None:
-            depthFrame = inDepth.getFrame()
-
-        # Normalization for better visualization
-        # depthFrame = (depthFrame * (255 / self.depth.initialConfig.getMaxDisparity())).astype(np.uint8) # for better visualization
-        # print(depthFrame) # range 0-65535
-        # cv2.imshow("depth", depthFrame.astype(np.uint8))
-        # Available color maps: https://docs.opencv.org/3.4/d3/d50/group__imgproc__colormap.html
-        # depthFrame = cv2.applyColorMap(depthFrame, cv2.COLORMAP_JET) # input to colorMap must be 0-255
-        # cv2.imshow("disparity_color", depthFrame)
+        depthFrame = inDepth.getFrame() if inDepth is not None else None
         return colorFrame, depthFrame
-    
+
     def get_images(self):
         colorFrame, depthFrame = self.get_frames()
-
         if depthFrame is None:
             return colorFrame, None
-
-        depth_image = np.asanyarray(depthFrame) * 0.001
-        depth_image[depth_image == 0] = math.nan
-        return colorFrame, depth_image
-        # return frames[0], np.asanyarray(frames[1]) * 0.001 # frames[1].astype(np.uint8)
-
-
-if __name__ == '__main__':
-    cam = DepthAiCamera()
-    color_intrin, depth_intrin = cam.get_intrinsics()
-    print(color_intrin)
-    print(depth_intrin)
-    fx = depth_intrin[0][0]
-    fy = depth_intrin[0][2]
-    cx = depth_intrin[1][1]
-    cy = depth_intrin[1][2]
-    print(fx, fy, cx, cy)
-
-    while True:
-        color_image, depth_image = cam.get_images()
-        if color_image is not None:
-            cv2.imshow('COLOR', color_image) # 显示彩色图像
-        cv2.imshow('DEPTH', depth_image) # 显示深度图像
-
-        key = cv2.waitKey(1)
-        # Press esc or 'q' to close the image window
-        if key & 0xFF == ord('q') or key == 27:
-            cam.stop()
-            break
+        depth_m = np.asanyarray(depthFrame).astype(np.float32) * 0.001
+        depth_m[depth_m == 0] = math.nan
+        return colorFrame, depth_m

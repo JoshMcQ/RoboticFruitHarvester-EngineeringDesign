@@ -41,7 +41,7 @@ LIFT_OFFSET_Z = 0 # lift_height = DETECT_XYZ[2] + LIFT_OFFSET_Z
 GRIPPER_Z_MM = 50 # mm
 
 # minimum z for grasping
-GRASPING_MIN_Z = 70 # mm
+GRASPING_MIN_Z = -75 # mm
 
 MOVE_SPEED = 100
 MOVE_ACC = 500
