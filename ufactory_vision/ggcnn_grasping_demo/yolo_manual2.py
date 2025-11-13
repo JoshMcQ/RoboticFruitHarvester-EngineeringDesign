@@ -20,17 +20,24 @@ arm.set_position(*OBS_POSE, wait=True)
 
 # ---------------- Hand-eye params ----------------
 # Try to import what advanced_calibrate2/3 emitted; else fall back to the JSON you posted.
-try:
-    from eef_to_color_opt import EULER_EEF_TO_COLOR_OPT  # [tx,ty,tz, rx,ry,rz]
-except Exception:
-    EULER_EEF_TO_COLOR_OPT = [
-        0.044463261748964825,
-       -0.04506782886567454,
-        0.08783029574857722,
-       -0.12076252054467258,
-       -0.03854854831136233,
-        1.516948917152654,
-    ]
+#try:
+ #   from eef_to_color_opt import EULER_EEF_TO_COLOR_OPT  # [tx,ty,tz, rx,ry,rz]
+###      0.044463261748964825,
+   #    -0.04506782886567454,
+    #    0.08783029574857722,
+     #  -0.12076252054467258,
+      # -0.03854854831136233,
+       # 1.516948917152654,
+   # ]
+EULER_EEF_TO_COLOR_OPT = [
+    0.048050763937651,
+    -0.044698964122373,
+    0.093132938810327,
+    -0.035049223098730,
+    0.011259520628180,
+    1.501212738316563,
+]
+
 
 # --- Grasp & safety parameters ---
 GRIPPER_OPEN_POS = 850

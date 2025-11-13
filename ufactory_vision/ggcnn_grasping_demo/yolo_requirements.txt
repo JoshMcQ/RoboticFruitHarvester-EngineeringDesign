@@ -2,7 +2,7 @@
 # Install with: pip install -r yolo_requirements.txt
 
 # Core dependencies with CUDA 12.1 support
---index-url https://download.pytorch.org/whl/cu121
+# Need this pytorch version: --index-url https://download.pytorch.org/whl/cu121
 torch
 torchvision
 torchaudio

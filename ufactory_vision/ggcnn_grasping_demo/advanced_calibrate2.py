@@ -41,11 +41,9 @@ arm = XArmAPI('192.168.1.221')
 time.sleep(0.5)
 arm.set_mode(0)
 arm.set_state(0)
-# Don't reset here; some users prefer to start from current pose
 # arm.reset(wait=True)
 
-# Observation poses (ALL 26 from your last successful sweep)
-# fmt: off
+# Observation poses
 OBSERVATION_POSES = [
     [357.4,   1.1, 231.7, 178.8,   0.3,   1.0],  # 1
     [289.3, -39.7, 428.6, 178.9, -13.4,  -6.9],  # 2
@@ -74,20 +72,20 @@ OBSERVATION_POSES = [
     [329.4, -84.5, 204.7, 179.5,  -2.1, -14.3],  # 25
     [247.3,-148.0, -23.6, 175.2,   1.5, -14.6],  # 26
 ]
-# fmt: on
+
 
 # Known AprilTag board: tag36h11; positions in robot base frame (mm)
 TAG_POSITIONS_MM = {
     0: [282.3,   44.6,  -89.3],  # BL
     3: [290.1, -118.3,  -89.5],  # BR
-    # 1 and 5 were swapped in an older note — corrected:
+    # 1 and 5 were swapped in an older note 
     1: [440.5,   45.3,  -86.3],  # +Y
     5: [445.4, -128.4,  -86.0],  # -Y
     2: [606.5,   54.0,  -83.2],  # TL
     4: [603.2, -131.6,  -81.0],  # TR
 }
 
-# Size of the **black square** edge (meters). Do NOT include white border.
+# Size of the **black square** edge, this the april tag
 TAG_SIZE_M = 0.060
 
 # Initial guess: your latest best params (meters/radians)
@@ -125,7 +123,7 @@ def _euler_rad_to_rot(rx, ry, rz):
     Rx = np.array([[1,0,0],[0,cr,-sr],[0,sr,cr]])
     Ry = np.array([[cp,0,sp],[0,1,0],[-sp,0,cp]])
     Rz = np.array([[cy,-sy,0],[sy,cy,0],[0,0,1]])
-    return Rz @ Ry @ Rx  # matches working code
+    return Rz @ Ry @ Rx  
 
 def _pose_to_mat4(x, y, z, rx, ry, rz):
     M = np.eye(4)
